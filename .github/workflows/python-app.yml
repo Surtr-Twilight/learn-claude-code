@@ -7,19 +7,18 @@ on:
         description: '✅ [核心] 选择在结束时创建的环境备份模式'
         required: true
         type: choice
-        default: 'chroot' # 已修改：默认启用 Chroot 备份
+        default: 'chroot'
         options:
           - 'none'
           - 'chroot'
       run_startup_script: { description: '🚀 [核心] 是否自动执行Chroot内的服务启动脚本?', required: true, type: boolean, default: true }
-      enable_ssh: { description: '🐞 [调试] 是否启用SSH手动调试 (将暂停自动化) ?', required: true, type: boolean, default: true } # 已修改：默认启用 SSH
+      enable_ssh: { description: '🐞 [调试] 是否启用SSH手动调试 (将暂停自动化) ?', required: true, type: boolean, default: true }
       ssh_timeout_minutes: { description: '⏳ SSH会话超时时间（分钟）', required: false, type: number, default: 350 }
       run_yunzai: { description: '  - 是否启动 Yunzai-Bot 服务? (包含 launcher)', type: boolean, default: true }
       run_loophole_webdav: { description: '  - 是否启动 Loophole WebDAV 隧道?', type: boolean, default: true }
       enable_napcat_tunnel: { description: '  - (Loophole) 是否额外启用 Napcat 内网穿透?', type: boolean, default: false }
       run_chmlfrp: { description: '  - 是否启动 ChmlFrp 服务? (包含 openlist)', type: boolean, default: true }
-    # schedule:
-    # 已修改：注释掉所有定时任务
+  schedule:
     # - cron: '10 12 * * 5'
     # - cron: '0 16 * * 5'
     # - cron: '0 22 * * 5'
@@ -50,6 +49,8 @@ env:
   B2_BUCKET_NAME: ${{ secrets.B2_BUCKET_NAME }}
   B2_DOWNLOAD_URL: ${{ secrets.B2_DOWNLOAD_URL }}
   CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+  # 这里定义 SSH 用户名的 Secret，如果没有设置，脚本中会有回退机制
+  SSH_USERNAME: ${{ secrets.SSH_USERNAME }}
 
 jobs:
   build-and-run-all:
@@ -213,10 +214,18 @@ jobs:
             exit 1
           fi
 
-          NEW_USER=${{ github.repository_owner }}
+          # ==========================================================
+          # 修改点：使用 Secret (SSH_USERNAME) 作为 SSH 用户名
+          # 逻辑：优先读取 Secret，如果未设置则使用仓库拥有者名称
+          # 注意：此变量同时用于拉取公钥，请确保 Secret 值为有效的 GitHub 用户名
+          NEW_USER="${{ secrets.SSH_USERNAME || github.repository_owner }}"
+          # ==========================================================
+          
           NEW_HOSTNAME=$(echo "${{ github.repository }}" | tr '/' '-')
           
           echo "--- 正在设置个性化 SSH 环境 ---"
+          echo "SSH 用户名将设置为: ${NEW_USER}"
+          
           sudo hostname "${NEW_HOSTNAME}"
           sudo useradd -m -s /bin/bash "${NEW_USER}"
           sudo usermod -aG sudo "${NEW_USER}"
@@ -226,7 +235,10 @@ jobs:
           
           AUTHORIZED_KEYS_FILE="/home/${NEW_USER}/.ssh/authorized_keys"
           sudo mkdir -p "/home/${NEW_USER}/.ssh"
+          
+          echo "正在从 GitHub 拉取用户 [${NEW_USER}] 的公钥..."
           curl -fsL "https://api.github.com/users/${NEW_USER}/keys" | jq -r '.[].key' | sudo tee "${AUTHORIZED_KEYS_FILE}" > /dev/null
+          
           sudo chown -R "${NEW_USER}:${NEW_USER}" "/home/${NEW_USER}/.ssh"
           sudo chmod 700 "/home/${NEW_USER}/.ssh" && sudo chmod 600 "${AUTHORIZED_KEYS_FILE}"
           sudo service ssh start
