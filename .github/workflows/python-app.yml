@@ -299,24 +299,30 @@ jobs:
           
           echo "--- 清理旧备份 (保留最后 2 个) ---"
           # 1. 获取需要删除的文件列表并存入临时文件
+          # 注意：这里的 lsjson 会列出当前活跃的文件版本，用于计算哪些是旧的
           rclone lsjson ${B2_FULL_PATH}/ | jq -r '[.[] | select(.Name | test("minisys_backup_.*\\.tar\\.(zst|gz)$"))] | sort_by(.ModTime) | .[:-2][] | .Name' > /tmp/files_to_delete.txt
           
           if [ -s /tmp/files_to_delete.txt ]; then
             echo "发现以下旧备份需要删除："
             cat /tmp/files_to_delete.txt
             
-            # 2. 逐行读取并删除
+            # 2. 逐行读取并执行硬删除
             while IFS= read -r file_name; do
               echo "----------------------------------------"
-              echo "🗑️ 正在删除: ${file_name}"
+              echo "🗑️ 正在硬删除 (Hard Delete): ${file_name}"
               
-              if rclone deletefile "${B2_FULL_PATH}/${file_name}"; then
-                 echo "   -> 删除命令执行成功，正在验证..."
-                 # 3. 验证文件是否真的不存在了 (rclone ls 如果没文件返回空)
+              # !!! 关键修改：使用 --b2-hard-delete 强制物理删除，不留隐藏标记 !!!
+              if rclone deletefile "${B2_FULL_PATH}/${file_name}" --b2-hard-delete; then
+                 echo "   -> 删除命令发送成功，正在验证..."
+                 
+                 # 3. 验证文件是否真的不存在了
+                 # 由于使用了硬删除，文件应该立即消失，且不会有 0B 的隐藏文件
                  if [[ -z $(rclone ls "${B2_FULL_PATH}/${file_name}") ]]; then
-                    echo "✅ 验证通过：文件已从存储桶中移除。"
+                    echo "✅ 验证通过：文件已彻底从存储桶中移除。"
                  else
-                    echo "❌ 验证失败：文件仍然存在！"
+                    echo "❌ 验证失败：文件可能仍然存在或变成了隐藏版本。"
+                    # 尝试列出所有版本以进行调试（如果验证失败）
+                    rclone ls "${B2_FULL_PATH}/${file_name}" --b2-versions || true
                  fi
               else
                  echo "❌ 删除命令执行失败。"
