@@ -49,7 +49,6 @@ env:
   B2_BUCKET_NAME: ${{ secrets.B2_BUCKET_NAME }}
   B2_DOWNLOAD_URL: ${{ secrets.B2_DOWNLOAD_URL }}
   CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
-  # 这里定义 SSH 用户名的 Secret，如果没有设置，脚本中会有回退机制
   SSH_USERNAME: ${{ secrets.SSH_USERNAME }}
 
 jobs:
@@ -214,13 +213,7 @@ jobs:
             exit 1
           fi
 
-          # ==========================================================
-          # 修改点：使用 Secret (SSH_USERNAME) 作为 SSH 用户名
-          # 逻辑：优先读取 Secret，如果未设置则使用仓库拥有者名称
-          # 注意：此变量同时用于拉取公钥，请确保 Secret 值为有效的 GitHub 用户名
           NEW_USER="${{ secrets.SSH_USERNAME || github.repository_owner }}"
-          # ==========================================================
-          
           NEW_HOSTNAME=$(echo "${{ github.repository }}" | tr '/' '-')
           
           echo "--- 正在设置个性化 SSH 环境 ---"
@@ -305,17 +298,34 @@ jobs:
           sudo tar -c ${EXCLUDE_OPTS} -f - -C ${{ env.CHROOT_DIR }} . | zstd -T0 -22 --long -c | rclone rcat ${B2_FULL_PATH}/${NEW_BACKUP_FILE} ${{ env.RCLONE_FLAGS }}
           
           echo "--- 清理旧备份 (保留最后 2 个) ---"
-          (
-            set +e
-            FILES_TO_DELETE=$(rclone lsjson ${B2_FULL_PATH}/ | jq -r '[.[] | select(.Name | test("minisys_backup_.*\\.tar\\.(zst|gz)$"))] | sort_by(.ModTime) | .[:-2][] | .Name' 2>/dev/null) || true
-            if [[ -n "$FILES_TO_DELETE" && "$FILES_TO_DELETE" != "null" ]]; then
-              echo "正在删除旧备份："
-              echo "$FILES_TO_DELETE"
-              for file_name in $FILES_TO_DELETE; do rclone deletefile "${B2_FULL_PATH}/${file_name}" || true; done
-            else
-              echo "没有旧备份需要清理。"
-            fi
-          )
+          # 1. 获取需要删除的文件列表并存入临时文件
+          rclone lsjson ${B2_FULL_PATH}/ | jq -r '[.[] | select(.Name | test("minisys_backup_.*\\.tar\\.(zst|gz)$"))] | sort_by(.ModTime) | .[:-2][] | .Name' > /tmp/files_to_delete.txt
+          
+          if [ -s /tmp/files_to_delete.txt ]; then
+            echo "发现以下旧备份需要删除："
+            cat /tmp/files_to_delete.txt
+            
+            # 2. 逐行读取并删除
+            while IFS= read -r file_name; do
+              echo "----------------------------------------"
+              echo "🗑️ 正在删除: ${file_name}"
+              
+              if rclone deletefile "${B2_FULL_PATH}/${file_name}"; then
+                 echo "   -> 删除命令执行成功，正在验证..."
+                 # 3. 验证文件是否真的不存在了 (rclone ls 如果没文件返回空)
+                 if [[ -z $(rclone ls "${B2_FULL_PATH}/${file_name}") ]]; then
+                    echo "✅ 验证通过：文件已从存储桶中移除。"
+                 else
+                    echo "❌ 验证失败：文件仍然存在！"
+                 fi
+              else
+                 echo "❌ 删除命令执行失败。"
+              fi
+            done < /tmp/files_to_delete.txt
+          else
+            echo "没有旧备份需要清理 (当前备份数量 <= 2)。"
+          fi
+          rm -f /tmp/files_to_delete.txt
 
       - name: 14. 最终清理
         if: always()
