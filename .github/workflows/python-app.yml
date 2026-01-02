@@ -18,7 +18,7 @@ on:
       run_loophole_webdav: { description: '  - 是否启动 Loophole WebDAV 隧道?', type: boolean, default: true }
       enable_napcat_tunnel: { description: '  - (Loophole) 是否额外启用 Napcat 内网穿透?', type: boolean, default: false }
       run_chmlfrp: { description: '  - 是否启动 ChmlFrp 服务? (包含 openlist)', type: boolean, default: true }
-    # schedule:
+  
     # - cron: '10 12 * * 5'
     # - cron: '0 16 * * 5'
     # - cron: '0 22 * * 5'
@@ -107,9 +107,18 @@ jobs:
             LATEST_BACKUP_FILENAME=$(rclone lsjson ${B2_FULL_PATH}/ | jq -r '[.[] | select(.Name | test("minisys_backup_.*\\.tar\\.(zst|gz)$"))] | sort_by(.ModTime) | .[-1].Name' 2>/dev/null)
             if [[ -n "$LATEST_BACKUP_FILENAME" && "$LATEST_BACKUP_FILENAME" != "null" ]]; then
               echo "   -> [A] 发现备份文件：${LATEST_BACKUP_FILENAME}。正在下载..."
-              # 已修改：添加 -vv 参数以显示详细调试日志
-              retry 3 rclone copyto "${B2_FULL_PATH}/${LATEST_BACKUP_FILENAME}" "/tmp/backup.archive" ${{ env.RCLONE_FLAGS }} -vv
-              echo "$LATEST_BACKUP_FILENAME" > /tmp/chroot_backup_info
+              # 修复：使用 copy 目录 + include 文件名，避免 copyto 直接指向文件导致的 EOF 错误
+              # 下载到 /tmp/ 目录，然后重命名
+              retry 3 rclone copy "${B2_FULL_PATH}/" "/tmp/" --include "${LATEST_BACKUP_FILENAME}" ${{ env.RCLONE_FLAGS }} -vv
+              
+              if [ -f "/tmp/${LATEST_BACKUP_FILENAME}" ]; then
+                 mv "/tmp/${LATEST_BACKUP_FILENAME}" "/tmp/backup.archive"
+                 echo "   -> [A] 下载并重命名成功。"
+                 echo "$LATEST_BACKUP_FILENAME" > /tmp/chroot_backup_info
+              else
+                 echo "❌ [A] rclone 报告成功但文件未找到！"
+                 exit 1
+              fi
             fi
           ) &
           CHROOT_DOWNLOAD_PID=$!
