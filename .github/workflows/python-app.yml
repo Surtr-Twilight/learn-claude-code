@@ -7,19 +7,18 @@ on:
         description: '✅ [核心] 选择在结束时创建的环境备份模式'
         required: true
         type: choice
-        default: 'chroot' # 已修改：默认启用 Chroot 备份
+        default: 'chroot'
         options:
           - 'none'
           - 'chroot'
       run_startup_script: { description: '🚀 [核心] 是否自动执行Chroot内的服务启动脚本?', required: true, type: boolean, default: true }
-      enable_ssh: { description: '🐞 [调试] 是否启用SSH手动调试 (将暂停自动化) ?', required: true, type: boolean, default: true } # 已修改：默认启用 SSH
+      enable_ssh: { description: '🐞 [调试] 是否启用SSH手动调试 (将暂停自动化) ?', required: true, type: boolean, default: true }
       ssh_timeout_minutes: { description: '⏳ SSH会话超时时间（分钟）', required: false, type: number, default: 350 }
       run_yunzai: { description: '  - 是否启动 Yunzai-Bot 服务? (包含 launcher)', type: boolean, default: true }
       run_loophole_webdav: { description: '  - 是否启动 Loophole WebDAV 隧道?', type: boolean, default: true }
       enable_napcat_tunnel: { description: '  - (Loophole) 是否额外启用 Napcat 内网穿透?', type: boolean, default: false }
       run_chmlfrp: { description: '  - 是否启动 ChmlFrp 服务? (包含 openlist)', type: boolean, default: true }
     # schedule:
-    # 已修改：注释掉所有定时任务
     # - cron: '10 12 * * 5'
     # - cron: '0 16 * * 5'
     # - cron: '0 22 * * 5'
@@ -108,7 +107,8 @@ jobs:
             LATEST_BACKUP_FILENAME=$(rclone lsjson ${B2_FULL_PATH}/ | jq -r '[.[] | select(.Name | test("minisys_backup_.*\\.tar\\.(zst|gz)$"))] | sort_by(.ModTime) | .[-1].Name' 2>/dev/null)
             if [[ -n "$LATEST_BACKUP_FILENAME" && "$LATEST_BACKUP_FILENAME" != "null" ]]; then
               echo "   -> [A] 发现备份文件：${LATEST_BACKUP_FILENAME}。正在下载..."
-              retry 3 rclone copyto "${B2_FULL_PATH}/${LATEST_BACKUP_FILENAME}" "/tmp/backup.archive" ${{ env.RCLONE_FLAGS }}
+              # 已修改：添加 -vv 参数以显示详细调试日志
+              retry 3 rclone copyto "${B2_FULL_PATH}/${LATEST_BACKUP_FILENAME}" "/tmp/backup.archive" ${{ env.RCLONE_FLAGS }} -vv
               echo "$LATEST_BACKUP_FILENAME" > /tmp/chroot_backup_info
             fi
           ) &
