@@ -18,7 +18,7 @@ on:
       run_loophole_webdav: { description: '  - 是否启动 Loophole WebDAV 隧道?', type: boolean, default: true }
       enable_napcat_tunnel: { description: '  - (Loophole) 是否额外启用 Napcat 内网穿透?', type: boolean, default: false }
       run_chmlfrp: { description: '  - 是否启动 ChmlFrp 服务? (包含 openlist)', type: boolean, default: true }
-  schedule:
+    # schedule:
     # 已修改：注释掉所有定时任务
     # - cron: '10 12 * * 5'
     # - cron: '0 16 * * 5'
